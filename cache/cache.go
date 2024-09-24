@@ -56,6 +56,7 @@ import (
 	"context"
 	"io"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/a-h/templ"
@@ -70,6 +71,7 @@ type Component struct {
 	key         string
 	initialized bool
 	lru         *lru
+	bufPool     *sync.Pool
 }
 
 type Option func(c *Component)
@@ -86,6 +88,11 @@ func New(opts ...Option) ComponentBuilder {
 	base := Component{
 		ttl: defaultTTL,
 		lru: newLRU(defaultMem),
+		bufPool: &sync.Pool{
+			New: func() any {
+				return new(bytes.Buffer)
+			},
+		},
 	}
 
 	for _, opt := range opts {
@@ -186,8 +193,11 @@ func (c Component) Render(ctx context.Context, w io.Writer) error {
 	}
 
 	// Render children to a buffer.
-	var buf bytes.Buffer
-	err := children.Render(ctx, &buf)
+	buf := c.bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer c.bufPool.Put(buf)
+
+	err := children.Render(ctx, buf)
 	if err != nil {
 		return err
 	}
